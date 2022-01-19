@@ -1,0 +1,218 @@
+//----------------------
+//LLIBRERIES ADICIONALS
+//----------------------
+
+#include <stdio.h>
+#include <stdlib.h>
+
+//----------------------
+//VARIABLES PRINCIPALS
+//---------------------- 
+
+//Timer
+int counter = 0;
+
+//BOTÓ I LED INDICADOR
+const int button = 8;            // GPIO 8 pel Botó d'encès i apagat
+const int led =7;                // GPIO 7 pel LED
+int ledflag=0;                   // LED status; a través d'aquest també definirem si el sistema estàs ON/OFF
+
+//POLSADO (PUSHBUTTON) PER ACTIVAR REG MANUAL
+
+const int reg_manual = 11;
+
+
+//SENSOR D'HUMITAT
+const int sensor_pin = A0;       // Entrada analògica per llegir els valors entrants del sensor d'humitat
+const int sensor_on = 12;        // Sortida digital per alimentar el sensor.
+int moisture;
+int output_value;
+const int max_hum = 300;         // Per poder calibrar fàcilment els paràmetres màxims i mínims d'humitat (resistència)del sensor.
+const int min_hum = 1000;         // Recordem que més humitat => menys resistència
+
+//SEMÀFOR D'HUMITAT
+const int vermell = 2;             // GPIO 2, 3, 4 pel semàfor d'humitat
+const int groc = 3;
+const int blau = 4;
+
+//RELÉ
+const int relay = 13;            // GPIO 13 pel Relé
+
+//ALTRES
+const long interval = 10000;     // Varialbe per controlar l'interval de temps entre llegides del sensor
+const int llindar = 700;         // LLindar d'humitat (respecte els valors del sensor) que utilitzem per decidir si es rega o no.
+unsigned long previousMillis = 0; //Guardem el darrer temps que vam llegir la humitat
+const int temps_reg=5000;        // Variable per controlar el temps es manté activa la bomba quan cal regar.
+  
+void setup() {
+  Serial.begin(9600);
+  
+  Serial.println("Reading From the Sensor ...");
+
+  delay(2000);
+
+  //Polsador (interruptor) ON/OFF
+  pinMode(button,INPUT);  // definim el botó (GPIO 8) com una entrada 
+
+  //Polsador (reg manual)
+  pinMode(reg_manual,INPUT); //definim el polsador-reg manual (GPIO 11) com una entrada
+  
+  //LED
+  pinMode(led,OUTPUT);    // definim led (GPIO 7) com a sortida
+  digitalWrite(led,LOW);  // ens assegurem que comencem "apagats"
+
+  //SENSOR
+  pinMode(sensor_on,OUTPUT);
+  digitalWrite(sensor_on,LOW);
+
+  //RELÉ
+  pinMode(relay,OUTPUT); // definim relé (GPIO 13) com a sortida
+  digitalWrite(relay,HIGH);
+
+  //SEMÁFOR D'HUMITAT
+  pinMode(vermell, OUTPUT);          
+  pinMode(groc, OUTPUT);
+  pinMode(blau, OUTPUT);  
+  }
+
+void loop() {
+   if (digitalRead(button)==HIGH){ // Butó pulsat?
+    if (ledflag==0) {              // Si el sistema no estava actiu
+      ledflag=1;                   // Canviem l'estat a "actiu" (1)
+      digitalWrite(led,HIGH);      // Activem el LED
+      
+      //Mentre no hi hagi informació sobre la humitat, ques'iluminin tots els LEDS
+      digitalWrite(vermell,HIGH);
+      digitalWrite(groc,HIGH);
+      digitalWrite(blau,HIGH);
+      }                            // 
+    else {                         // En cas contrari...
+      ledflag=0;                   // Canviem l'estat a "desactivat" (0)
+      digitalWrite(led,LOW);       // Apaguem el LED
+      byebyeLED();
+    }
+  delay(200);                      // Petit temps d'estabilització 
+  }
+
+  //El nostre estatus de sistema ON/OFF serà el "ledflag"
+  if (ledflag==1){
+    active();                      // I llancem la lògica principal
+  }else{
+    sistema_off();
+  }
+  
+}
+
+void active(){
+
+    
+    //La idea es comprovar la humitat cada "interval" de temps
+    //Necessitem de la funció "millis" per poder treballar de manera asincrona i no interferir en la lògica global
+    unsigned long currentMillis = millis(); //Aquí obtenim el temps en aquest precís moment
+  
+  //Farem que el reg manual tingui preferència sobre la resta de la lògica
+  if (digitalRead(reg_manual)==HIGH){       //Si el botó de reg manual està actiu (circuit tancat)
+    digitalWrite(relay,LOW);                //Activem el circuit normalment obert del relé
+    Serial.println("MANUAL");               
+    previousMillis = currentMillis;         //Reinicialicem els valors de temps perque no intenti regar de manera automàtica just després.
+    digitalWrite(vermell, HIGH);
+    digitalWrite(groc, HIGH);
+   digitalWrite(blau, HIGH);
+  }else{
+    digitalWrite(relay,HIGH);               //En cas contrari ens asegurem d'apagar la bomba i continuar amb la lògica de funcionament automàtic.     
+    
+    //Si la diferència entre el temps actual i el previ es superior a l'interval...
+    if (currentMillis - previousMillis >= interval) {
+      // Guardem aquest instant com a nou punt de referència
+      previousMillis = currentMillis;
+      //checkWater(); En cas de sensor d'aigua
+          Serial.println("CheckMoisture");
+      checkMoisture(); //I comencem el procés d'activació del sensor i llegir el seu valor
+    }
+  }
+}
+
+//Comprovem quina es l'humitat del sòl i decidim si reguem
+void checkMoisture(){
+  //Abans de res activem l'alimentació pel sensor   
+  digitalWrite(sensor_on,HIGH);       
+  delay(100); //Petit temps per donar temps a estabilitzar-se
+   
+  //Llegim els valors del sensor d'humitat
+  moisture = analogRead(sensor_pin); // Una per la humitat
+  output_value = map(moisture,min_hum,max_hum,0,100); // Mapejem l'interval de possibles valors calibrat a un percentatge (d'humitat)
+  
+  //Fem el nostre semàfor independent de la lògica posterior
+  semafor();
+  
+  Serial.print("Valor d'humitat: ");
+  Serial.print(output_value);
+  Serial.print("%");
+  Serial.print(" - Valor del sensor: ");
+  Serial.println(moisture);
+ 
+  
+  if(moisture >= llindar){ //A més resistència, menys humitat! Per tant, si "moisture" per sobre del llindar, tocarà regar!
+        Serial.println("A regar!");
+        watering();
+  }
+
+  //Finalment apaguem l'alimentació innecessària
+  digitalWrite(sensor_on,LOW);  
+}
+
+// LÒGICA DEL SEMÀFOR D'HUMITAT
+void semafor(){
+  Serial.println("Semafor!");
+   //Reiniciem l'estat del semàfor d'humitat
+  digitalWrite(vermell, LOW);
+  digitalWrite(groc, LOW);
+  digitalWrite(blau, LOW);
+
+  if (output_value < 40) {
+    digitalWrite(vermell, HIGH);
+  } else {
+    if (output_value < 70){
+      digitalWrite(groc, HIGH);
+    }else {
+      digitalWrite(blau,HIGH);
+    }
+  }
+}
+
+//REGUEM
+void watering(){
+  delay(200);
+  digitalWrite(relay,LOW);
+  Serial.println("Regant");
+  delay(temps_reg);
+  digitalWrite(relay, HIGH);
+}
+
+//SISTEMA_OFF
+void sistema_off(){
+  digitalWrite(relay,HIGH);       // Desactivem les sortides
+  digitalWrite(sensor_on,LOW); 
+}
+
+void byebyeLED(){
+    digitalWrite(vermell,LOW);
+  digitalWrite(groc, LOW);
+  digitalWrite(blau, LOW);
+  delay(500);
+  digitalWrite(vermell,HIGH);
+  digitalWrite(groc, HIGH);
+  digitalWrite(blau, HIGH);
+  delay(500);
+  digitalWrite(vermell,LOW);
+  digitalWrite(groc, LOW);
+  digitalWrite(blau, LOW);
+  delay(500);
+  digitalWrite(vermell,HIGH);
+  digitalWrite(groc, HIGH);
+  digitalWrite(blau, HIGH);
+  delay(500);
+  digitalWrite(vermell,LOW);
+  digitalWrite(groc, LOW);
+  digitalWrite(blau, LOW); 
+}
