@@ -39,10 +39,21 @@ const int blau = 4;
 const int relay = 13;            // GPIO 13 pel Relé
 
 //ALTRES
-const long interval = 10000;     // Varialbe per controlar l'interval de temps entre llegides del sensor
+const long interval = 15000;     // Varialbe per controlar l'interval de temps entre llegides del sensor
 const int llindar = 700;         // LLindar d'humitat (respecte els valors del sensor) que utilitzem per decidir si es rega o no.
 unsigned long previousMillis = 0; //Guardem el darrer temps que vam llegir la humitat
 const int temps_reg=5000;        // Variable per controlar el temps es manté activa la bomba quan cal regar.
+
+
+//FUNCTION PROTOTYPES
+
+void active();
+void checkMoisture();
+void semafor();
+void watering();
+void sistema_off();
+void byebyeLED();
+
   
 void setup() {
   Serial.begin(9600);
@@ -87,6 +98,7 @@ void loop() {
       digitalWrite(blau,HIGH);
       }                            // 
     else {                         // En cas contrari...
+      Serial.println("Apagant...");
       ledflag=0;                   // Canviem l'estat a "desactivat" (0)
       digitalWrite(led,LOW);       // Apaguem el LED
       byebyeLED();
@@ -117,7 +129,7 @@ void active(){
     previousMillis = currentMillis;         //Reinicialicem els valors de temps perque no intenti regar de manera automàtica just després.
     digitalWrite(vermell, HIGH);
     digitalWrite(groc, HIGH);
-   digitalWrite(blau, HIGH);
+    digitalWrite(blau, HIGH);
   }else{
     digitalWrite(relay,HIGH);               //En cas contrari ens asegurem d'apagar la bomba i continuar amb la lògica de funcionament automàtic.     
     
@@ -187,6 +199,7 @@ void watering(){
   Serial.println("Regant");
   delay(temps_reg);
   digitalWrite(relay, HIGH);
+  delay(200);
 }
 
 //SISTEMA_OFF
